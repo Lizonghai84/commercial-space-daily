@@ -1,0 +1,71 @@
+{
+  "news_api": {
+    "name": "Spaceflight News API",
+    "url": "https://api.spaceflightnewsapi.net/v4/articles/",
+    "weight": 70,
+    "limit": 100
+  },
+  "news_site_weights": {
+    "SpaceNews": 100,
+    "Payload": 95,
+    "Arstechnica": 92,
+    "Ars Technica": 92,
+    "NASA": 90,
+    "European Spaceflight": 90,
+    "NASASpaceflight": 90,
+    "Spaceflight Now": 90,
+    "Satnews": 88,
+    "Space.com": 85,
+    "The Space Devs": 82
+  },
+  "rss": [
+    {
+      "name": "SpaceNews",
+      "url": "https://spacenews.com/feed/",
+      "weight": 100
+    },
+    {
+      "name": "NASA",
+      "url": "https://www.nasa.gov/feed/",
+      "weight": 90
+    },
+    {
+      "name": "Spaceflight Now",
+      "url": "https://spaceflightnow.com/feed/",
+      "weight": 90
+    },
+    {
+      "name": "NASASpaceflight",
+      "url": "https://www.nasaspaceflight.com/feed/",
+      "weight": 90
+    },
+    {
+      "name": "Ars Technica Space",
+      "url": "https://arstechnica.com/space/feed/",
+      "weight": 92
+    }
+  ],
+  "launch_api": {
+    "name": "Launch Library 2",
+    "previous_url": "https://ll.thespacedevs.com/2.3.0/launches/previous/",
+    "upcoming_url": "https://ll.thespacedevs.com/2.3.0/launches/upcoming/",
+    "weight": 100,
+    "limit": 30
+  },
+  "research_api": {
+    "name": "arXiv",
+    "url": "https://export.arxiv.org/api/query",
+    "weight": 88,
+    "limit": 30,
+    "lookback_days": 14,
+    "query": "all:satellite OR all:\"reusable launch vehicle\" OR all:\"space debris\" OR all:\"space situational awareness\""
+  },
+  "crossref_api": {
+    "name": "Crossref",
+    "url": "https://api.crossref.org/works",
+    "weight": 84,
+    "limit": 30,
+    "lookback_days": 14,
+    "query": "satellite communications reusable launch vehicle orbital debris"
+  }
+}
