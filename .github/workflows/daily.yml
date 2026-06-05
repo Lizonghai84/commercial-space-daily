@@ -18,14 +18,11 @@ jobs:
           python-version: "3.12"
       - name: Generate report
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: deepseek-v4-flash
         run: |
-          if [ -n "$OPENAI_API_KEY" ]; then
-            python3 space_daily.py --llm
-          else
-            python3 space_daily.py
-          fi
+          test -n "$DEEPSEEK_API_KEY"
+          python3 space_daily.py
       - name: Commit report
         run: |
           git config user.name "github-actions[bot]"

@@ -396,49 +396,104 @@ def deduplicate(items: list[Item], now: dt.datetime, threshold: float = 0.72) ->
     return result
 
 
-def extract_response_text(payload: dict[str, Any]) -> str:
-    for output in payload.get("output", []):
-        for content in output.get("content", []):
-            if content.get("type") == "output_text":
-                return content.get("text", "")
-    return ""
+def selected_items(items: list[Item], per_category: int) -> list[Item]:
+    return [
+        item
+        for category in CATEGORIES
+        for item in [candidate for candidate in items if candidate.category == category][:per_category]
+    ]
 
 
-def enhance_summaries_with_llm(items: list[Item], model: str) -> SourceStatus:
-    api_key = os.environ.get("OPENAI_API_KEY")
+def contains_chinese(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+
+def apply_deepseek_result(items: list[Item], result: dict[str, Any]) -> str:
+    daily_overview = clean_text(result.get("daily_overview"), 500)
+    if not daily_overview or not contains_chinese(daily_overview):
+        raise ValueError("DeepSeek 未返回有效的中文今日速览")
+    if len(daily_overview) > 260:
+        raise ValueError(f"DeepSeek 今日速览过长：{len(daily_overview)} 字")
+    summaries = {
+        row.get("url"): clean_text(row.get("summary_zh"))
+        for row in result.get("items", [])
+        if isinstance(row, dict)
+    }
+    missing = [item.url for item in items if not summaries.get(item.url) or not contains_chinese(summaries[item.url])]
+    if missing:
+        raise ValueError(f"DeepSeek 缺少 {len(missing)} 条有效中文摘要")
+    for item in items:
+        item.summary = summaries[item.url]
+    return daily_overview
+
+
+def call_deepseek(messages: list[dict[str, str]], model: str, api_key: str) -> dict[str, Any]:
+    request = urllib.request.Request(
+        "https://api.deepseek.com/chat/completions",
+        data=json.dumps(
+            {
+                "model": model,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+                "thinking": {"type": "disabled"},
+                "max_tokens": 8192,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=180) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    content = payload["choices"][0]["message"].get("content")
+    if not content:
+        raise ValueError("DeepSeek 返回了空内容")
+    return json.loads(content)
+
+
+def enhance_with_deepseek(items: list[Item], model: str) -> tuple[str, SourceStatus]:
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
     if not api_key:
-        return SourceStatus("OpenAI 汇总", False, error="未设置 OPENAI_API_KEY")
+        raise RuntimeError("未设置 DEEPSEEK_API_KEY，无法生成全中文日报")
     compact = [
         {
             "url": item.url,
             "title": item.title,
             "source": item.source,
+            "category": item.category,
             "related_sources": item.related_sources,
             "summary": item.summary,
         }
         for item in items
     ]
-    prompt = (
-        "你是商业航天日报编辑。根据输入事实，为每条内容写一条不超过80字的中文摘要。"
-        "不要添加输入中没有的事实。只返回 JSON 数组，每项格式为"
-        '{"url":"原URL","summary_zh":"摘要"}。\n输入：' + json.dumps(compact, ensure_ascii=False)
-    )
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps({"model": model, "input": prompt}).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=90) as response:
-            text = extract_response_text(json.loads(response.read().decode("utf-8")))
-        replacements = {row["url"]: row["summary_zh"] for row in json.loads(text)}
-        for item in items:
-            if item.url in replacements:
-                item.summary = clean_text(replacements[item.url])
-        return SourceStatus("OpenAI 汇总", True, len(replacements))
-    except Exception as exc:
-        return SourceStatus("OpenAI 汇总", False, error=str(exc))
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "你是严谨的商业航天日报中文编辑。只能使用输入中的事实，不得补充、猜测或夸大。"
+                "所有输出必须使用简体中文，机构、公司、任务和型号名称可保留原文。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "根据输入内容输出 JSON 对象。为每一项写一条不超过100字的中文摘要，并基于全部内容"
+                "写一段120至220字、2至3句的中文今日速览小结，只点出最重要的行业、技术、研究和发射趋势。"
+                "必须为输入中的每个 URL 返回且只返回一项，不能遗漏。"
+                'JSON 格式示例：{"daily_overview":"中文小结","items":[{"url":"原URL","summary_zh":"中文摘要"}]}。'
+                "\n输入：" + json.dumps(compact, ensure_ascii=False)
+            ),
+        },
+    ]
+    last_error: Exception | None = None
+    for _ in range(2):
+        try:
+            result = call_deepseek(messages, model, api_key)
+            overview = apply_deepseek_result(items, result)
+            return overview, SourceStatus(f"DeepSeek {model}", True, len(items))
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"DeepSeek 中文日报生成失败：{last_error}") from last_error
 
 
 def render_report(
@@ -448,6 +503,7 @@ def render_report(
     generated_at: dt.datetime,
     hours: int,
     per_category: int,
+    daily_overview: str,
 ) -> str:
     counts = {category: 0 for category in CATEGORIES}
     for item in items:
@@ -455,11 +511,13 @@ def render_report(
     lines = [
         f"# 商业航天日报 | {report_date.isoformat()}",
         "",
-        f"> 生成时间：{generated_at.strftime('%Y-%m-%d %H:%M %Z')}  ",
-        f"> 新闻窗口：最近 {hours} 小时；发射预告：未来 7 天；研究成果：最近 14 天。  ",
-        "> MVP 规则：按信源权重、商业航天关键词与时效性排序；标题相似度去重；摘要来自信源或可选模型精炼。",
+        f"> 生成时间：{generated_at.strftime('%Y-%m-%d %H:%M %Z')}",
+        f"> 新闻窗口：最近 {hours} 小时；发射预告：未来 7 天；研究成果：最近 14 天。",
+        "> MVP 规则：按信源权重、商业航天关键词与时效性排序；标题相似度去重；DeepSeek V4 Flash 生成中文摘要与今日小结。",
         "",
         "## 今日速览",
+        "",
+        daily_overview,
         "",
         f"- 行业动态：{counts['行业动态']} 条候选",
         f"- 最新技术：{counts['最新技术']} 条候选",
@@ -469,7 +527,7 @@ def render_report(
     ]
     for category in CATEGORIES:
         lines.extend([f"## {category}", ""])
-        selected = [item for item in items if item.category == category][:per_category]
+        selected = [item for item in selected_items(items, per_category) if item.category == category]
         if not selected:
             lines.extend(["_本次抓取窗口内暂无可用内容。_", ""])
             continue
@@ -539,8 +597,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--date", help="日报日期，格式 YYYY-MM-DD；默认使用 Asia/Shanghai 今天")
     parser.add_argument("--hours", type=int, default=36, help="新闻回看窗口，默认 36 小时")
     parser.add_argument("--per-category", type=int, default=8, help="每个栏目最多输出条数")
-    parser.add_argument("--llm", action="store_true", help="使用 OpenAI API 精炼入选摘要")
-    parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL") or "gpt-5-mini")
+    parser.add_argument("--model", default=os.environ.get("DEEPSEEK_MODEL") or "deepseek-v4-flash")
     return parser
 
 
@@ -551,14 +608,9 @@ def main(argv: list[str] | None = None) -> int:
     report_date = dt.date.fromisoformat(args.date) if args.date else generated_at.date()
     config = load_config(args.config)
     items, statuses = collect(config, generated_at.astimezone(dt.timezone.utc), args.hours)
-    if args.llm:
-        selected = [
-            item
-            for category in CATEGORIES
-            for item in [candidate for candidate in items if candidate.category == category][: args.per_category]
-        ]
-        statuses.append(enhance_summaries_with_llm(selected, args.model))
-    report = render_report(items, statuses, report_date, generated_at, args.hours, args.per_category)
+    overview, status = enhance_with_deepseek(selected_items(items, args.per_category), args.model)
+    statuses.append(status)
+    report = render_report(items, statuses, report_date, generated_at, args.hours, args.per_category, overview)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / f"{report_date.isoformat()}.md"
     output.write_text(report, encoding="utf-8")

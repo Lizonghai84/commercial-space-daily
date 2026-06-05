@@ -11,25 +11,18 @@
 | 研究成果 | arXiv API、Crossref API | 最近 14 天增量 |
 | 最新发射 | Launch Library 2 | 最近 36 小时 + 未来 7 天 |
 
-去重默认采用标题近似匹配，摘要默认使用信源摘要。配置 `OPENAI_API_KEY` 后可用模型把入选内容精炼为中文摘要。所有信源失败都会记录在日报末尾，不会阻止其他信源生成。
+去重采用标题近似匹配。DeepSeek V4 Flash 为所有最终入选内容生成中文摘要，并根据当天内容生成中文“今日速览”小结。所有信源失败都会记录在日报末尾，不会阻止其他信源生成。
 
 ## 本地生成
 
-仅依赖 Python 3.11+ 标准库：
+仅依赖 Python 3.11+ 标准库，生成日报需要通过环境变量提供 DeepSeek API key：
 
 ```bash
+export DEEPSEEK_API_KEY="..."
 python3 space_daily.py
 ```
 
 输出文件为 `reports/YYYY-MM-DD.md`。
-
-可选模型汇总：
-
-```bash
-export OPENAI_API_KEY="..."
-export OPENAI_MODEL="gpt-5-mini"
-python3 space_daily.py --llm
-```
 
 常用参数：
 
@@ -44,7 +37,7 @@ python3 space_daily.py --date 2026-06-05
 
 ## 自动运行
 
-GitHub Actions 每天北京时间 08:00 运行，也支持在 Actions 页面手动触发。工作流会生成日报并提交到仓库。若仓库配置了 `OPENAI_API_KEY` Secret，则自动启用模型摘要。
+GitHub Actions 每天北京时间 08:00 运行，也支持在 Actions 页面手动触发。工作流使用仓库 Secret `DEEPSEEK_API_KEY` 调用 `deepseek-v4-flash`，生成全中文摘要和今日小结并提交日报。API key 不写入仓库。
 
 ## 测试
 
