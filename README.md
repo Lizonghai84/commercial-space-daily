@@ -37,7 +37,7 @@ python3 space_daily.py --date 2026-06-05
 
 ## 自动运行
 
-GitHub Actions 每天北京时间 08:00 运行，也支持在 Actions 页面手动触发。工作流使用仓库 Secret `DEEPSEEK_API_KEY` 调用 `deepseek-v4-flash`，生成全中文摘要和今日小结并提交日报。API key 不写入仓库。
+GitHub Actions 仅支持在 Actions 页面手动触发。工作流使用仓库 Secret `DEEPSEEK_API_KEY` 调用 `deepseek-v4-flash`，生成全中文摘要和今日小结并提交日报。API key 不写入仓库。
 
 ## 测试
 
